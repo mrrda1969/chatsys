@@ -1,0 +1,22 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Existing rules...
+    
+    // WebRTC Call Rules
+    match /calls/{callId} {
+      allow create: if request.auth != null;
+      allow read, update: if request.auth != null && 
+        (request.auth.uid == resource.data.caller || 
+         request.auth.uid == resource.data.callee);
+      
+      // Allow adding ICE candidates for the call
+      match /candidates/{candidateId} {
+        allow create: if request.auth != null;
+        allow read: if request.auth != null && 
+          (request.auth.uid == get(/databases/$(database)/documents/calls/$(callId)).data.caller || 
+           request.auth.uid == get(/databases/$(database)/documents/calls/$(callId)).data.callee);
+      }
+    }
+  }
+} 

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "825700866397",
+    "project_id": "elms-d2336",
+    "storage_bucket": "elms-d2336.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:825700866397:android:c9e56b407c7759fa3d70b4",
+        "android_client_info": {
+          "package_name": "com.example.chatsys"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD61inhAja6knwwFNNJd2mavFK9RTrkAvA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
