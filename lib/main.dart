@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
-import 'firebase_options.dart';
+import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
+import 'theme_provider.dart';
 import 'screens/splash_screen.dart';
-import 'theme/theme_provider.dart';
-import 'screens/contacts_screen.dart';
-import 'screens/register_page.dart';
+import 'firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,6 +15,16 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
+  // Initialize FacebookAuth
+  // await FacebookAuth.instance.autoLogAppEvents();
+  // await FacebookAuth.instance.init(
+  //   options: const FacebookOptions(
+  //     appId: 'YOUR_FACEBOOK_APP_ID',
+  //     clientToken: 'YOUR_CLIENT_TOKEN',
+  //     loginBehavior: LoginBehavior.nativeWithFallback, // Recommended
+  //   ),
+  // );
+
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -23,7 +32,12 @@ void main() async {
 
   runApp(
     ChangeNotifierProvider(
-      create: (context) => ThemeProvider(),
+      create: (context) => ThemeProvider(
+        WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+                Brightness.dark
+            ? darkTheme
+            : lightTheme,
+      ),
       child: const MyApp(),
     ),
   );
@@ -34,21 +48,13 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<ThemeProvider>(
-      builder: (context, themeProvider, child) {
-        return Builder(
-          builder: (BuildContext context) {
-            return MaterialApp(
-              debugShowCheckedModeBanner: false,
-              title: 'Video Chat App',
-              theme: lightTheme,
-              darkTheme: darkTheme,
-              themeMode: themeProvider.themeMode,
-              home: const SplashScreen(),
-            );
-          },
-        );
-      },
+    final themeProvider = Provider.of<ThemeProvider>(context);
+
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'ChatSys',
+      theme: themeProvider.themeData,
+      home: const SplashScreen(),
     );
   }
 }

@@ -1,10 +1,10 @@
+import 'package:chatsys/models/user_model.dart';
+import 'package:chatsys/screens/contacts_screen.dart';
+import 'package:chatsys/screens/login_screen.dart';
+import 'package:chatsys/screens/profile_setup_page.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../screens/register_page.dart';
-import '../screens/contacts_screen.dart';
-import '../screens/profile_setup_page.dart';
-import '../models/user_model.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -30,7 +30,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
     if (currentUser == null) {
       // No user logged in
-      _navigateTo(const RegisterPage());
+      _navigateTo(const LoginScreen());
     } else {
       try {
         // Check if user exists in Firestore
@@ -50,7 +50,7 @@ class _SplashScreenState extends State<SplashScreen> {
         }
       } catch (e) {
         // Error checking user, default to login
-        _navigateTo(const RegisterPage());
+        _navigateTo(const LoginScreen());
       }
     }
   }

@@ -1,19 +1,18 @@
-import 'package:chatsys/services/call_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import '../services/webrtc_service.dart';
+import '../services/contacts_service.dart';
 
 class VideoCallScreen extends StatefulWidget {
-  final String callId;
-  final String remoteUserId;
+  final String contactId;
   final bool isIncoming;
+  final String? callId;
 
   const VideoCallScreen({
     super.key,
-    required this.callId,
-    required this.remoteUserId,
-    required this.isIncoming,
+    required this.contactId,
+    this.isIncoming = false,
+    this.callId,
   });
 
   @override
@@ -21,199 +20,214 @@ class VideoCallScreen extends StatefulWidget {
 }
 
 class _VideoCallScreenState extends State<VideoCallScreen> {
-  final CallService _callService = CallService();
+  final WebRTCService _webRTCService = WebRTCService();
+  final ContactsService _contactsService = ContactsService();
+
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
   final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
-  bool _isCallConnected = false;
-  bool _isMicMuted = false;
-  bool _isCameraOff = false;
+
+  bool _isVideoEnabled = true;
+  bool _isAudioEnabled = true;
+  String? _currentCallId;
 
   @override
   void initState() {
     super.initState();
-    _initializeCall();
+    _initRenderers();
+    _setupCallService();
   }
 
-  Future<void> _initializeCall() async {
+  Future<void> _initRenderers() async {
     await _localRenderer.initialize();
     await _remoteRenderer.initialize();
-
-    await _callService.initializeCall(widget.callId);
-
-    if (_callService.localStream != null) {
-      _localRenderer.srcObject = _callService.localStream;
-    }
-
-    if (!widget.isIncoming) {
-      await _callService.createOffer(widget.remoteUserId);
-    }
-
-    _setupCallListener();
   }
 
-  void _setupCallListener() {
-    FirebaseFirestore.instance
-        .collection('calls')
-        .doc(widget.callId)
-        .snapshots()
-        .listen((snapshot) async {
-      if (!snapshot.exists) return;
+  void _setupCallService() {
+    // Set up stream availability callbacks with error handling
+    _webRTCService.onLocalStreamAvailable = (stream) {
+      try {
+        setState(() {
+          _localRenderer.srcObject = stream;
+        });
+      } catch (e) {
+        print('Error setting local stream: $e');
+      }
+    };
 
-      final data = snapshot.data()!;
-
-      if (widget.isIncoming && data['offer'] != null && !_isCallConnected) {
-        await _callService.handleOffer(
-          RTCSessionDescription(
-            data['offer']['sdp'],
-            data['offer']['type'],
+    _webRTCService.onRemoteStreamAvailable = (stream) {
+      try {
+        setState(() {
+          _remoteRenderer.srcObject = stream;
+        });
+      } catch (e) {
+        print('Error setting remote stream: $e');
+        // Optionally show a snackbar or dialog about stream issues
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Problem with remote video stream: $e'),
+            backgroundColor: Colors.red,
           ),
         );
       }
+    };
 
-      if (!widget.isIncoming && data['answer'] != null && !_isCallConnected) {
-        await _callService.handleAnswer(
-          RTCSessionDescription(
-            data['answer']['sdp'],
-            data['answer']['type'],
-          ),
-        );
-        setState(() => _isCallConnected = true);
-      }
+    // Initiate or answer call based on type
+    _initiateOrAnswerCall();
+  }
 
-      if (data['status'] == 'ended') {
-        Navigator.pop(context);
-      }
-    });
-
-    // Listen for ICE candidates
-    FirebaseFirestore.instance
-        .collection('calls')
-        .doc(widget.callId)
-        .collection('candidates')
-        .snapshots()
-        .listen((snapshot) {
-      for (var change in snapshot.docChanges) {
-        if (change.type == DocumentChangeType.added) {
-          _callService.handleRemoteCandidate(change.doc.data()!);
+  Future<void> _initiateOrAnswerCall() async {
+    try {
+      if (widget.isIncoming && widget.callId != null) {
+        // Answering an incoming call
+        await _webRTCService.answerCall(widget.callId!);
+        setState(() {
+          _currentCallId = widget.callId;
+        });
+      } else {
+        // Initiating a new call
+        final callId = await _webRTCService.startCall(widget.contactId);
+        if (callId == null) {
+          throw Exception('Failed to initiate call');
         }
+        setState(() {
+          _currentCallId = callId;
+        });
+      }
+    } catch (e) {
+      print('Error initiating/answering call: $e');
+
+      // Show detailed error dialog
+      await showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Call Error'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Failed to start/answer call:'),
+              const SizedBox(height: 10),
+              Text(
+                e.toString(),
+                style: const TextStyle(color: Colors.red),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+
+      // Navigate back
+      Navigator.of(context).pop();
+    }
+  }
+
+  void _toggleVideo() {
+    setState(() {
+      _isVideoEnabled = !_isVideoEnabled;
+      final videoTracks = _webRTCService.getLocalVideoTracks();
+      if (videoTracks != null && videoTracks.isNotEmpty) {
+        videoTracks.first.enabled = _isVideoEnabled;
       }
     });
-
-    // Listen for remote stream
-    if (_callService.peerConnection != null) {
-      _callService.peerConnection!.onAddStream = (stream) {
-        _remoteRenderer.srcObject = stream;
-        setState(() => _isCallConnected = true);
-      };
-    }
   }
 
-  void _toggleMicrophone() {
-    if (_callService.localStream != null) {
-      final audioTrack = _callService.localStream!
-          .getAudioTracks()
-          .firstWhere((track) => track.kind == 'audio');
-      setState(() {
-        _isMicMuted = !_isMicMuted;
-        audioTrack.enabled = !_isMicMuted;
-      });
-    }
-  }
-
-  void _toggleCamera() {
-    if (_callService.localStream != null) {
-      final videoTrack = _callService.localStream!
-          .getVideoTracks()
-          .firstWhere((track) => track.kind == 'video');
-      setState(() {
-        _isCameraOff = !_isCameraOff;
-        videoTrack.enabled = !_isCameraOff;
-      });
-    }
+  void _toggleAudio() {
+    setState(() {
+      _isAudioEnabled = !_isAudioEnabled;
+      final audioTracks = _webRTCService.getLocalAudioTracks();
+      if (audioTracks != null && audioTracks.isNotEmpty) {
+        audioTracks.first.enabled = _isAudioEnabled;
+      }
+    });
   }
 
   void _endCall() async {
-    await _callService.endCall();
-    if (mounted) {
-      Navigator.pop(context);
+    // End the call if we have a call ID
+    if (_currentCallId != null) {
+      await _webRTCService.endCall(_currentCallId!);
     }
-  }
 
-  @override
-  void dispose() {
-    _localRenderer.dispose();
-    _remoteRenderer.dispose();
-    _callService.endCall();
-    super.dispose();
+    // Cleanup resources
+    _webRTCService.cleanup();
+
+    // Navigate back
+    Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
       body: SafeArea(
         child: Stack(
           children: [
-            // Remote Video
-            _isCallConnected
-                ? RTCVideoView(
-                    _remoteRenderer,
-                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                  )
-                : const Center(
-                    child: CircularProgressIndicator(),
-                  ),
+            // Remote video view (Large frame)
+            Positioned.fill(
+              child: RTCVideoView(_remoteRenderer,
+                  objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover),
+            ),
 
-            // Local Video (Picture-in-Picture)
+            // Local video view (Small overlay)
             Positioned(
+              top: 40,
               right: 20,
-              top: 20,
+              width: 120,
+              height: 160,
               child: Container(
-                width: 100,
-                height: 150,
                 decoration: BoxDecoration(
-                  border: Border.all(color: Colors.white),
-                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white, width: 2),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: RTCVideoView(
-                    _localRenderer,
-                    mirror: true,
-                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                  ),
+                  child: RTCVideoView(_localRenderer,
+                      objectFit:
+                          RTCVideoViewObjectFit.RTCVideoViewObjectFitCover),
                 ),
               ),
             ),
 
-            // Call Controls
+            // Call controls
             Positioned(
-              bottom: 40,
+              bottom: 20,
               left: 0,
               right: 0,
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  FloatingActionButton(
-                    backgroundColor: _isMicMuted ? Colors.red : Colors.white,
-                    onPressed: _toggleMicrophone,
-                    child: Icon(
-                      _isMicMuted ? Icons.mic_off : Icons.mic,
-                      color: _isMicMuted ? Colors.white : Colors.black,
+                  // Mute/Unmute Audio
+                  IconButton(
+                    icon: Icon(
+                      _isAudioEnabled ? Icons.mic : Icons.mic_off,
+                      color: Colors.white,
+                      size: 36,
                     ),
+                    onPressed: _toggleAudio,
                   ),
-                  FloatingActionButton(
-                    backgroundColor: Colors.red,
+
+                  // Video On/Off
+                  IconButton(
+                    icon: Icon(
+                      _isVideoEnabled ? Icons.videocam : Icons.videocam_off,
+                      color: Colors.white,
+                      size: 36,
+                    ),
+                    onPressed: _toggleVideo,
+                  ),
+
+                  // End Call
+                  IconButton(
+                    icon: const Icon(
+                      Icons.call_end,
+                      color: Colors.red,
+                      size: 36,
+                    ),
                     onPressed: _endCall,
-                    child: const Icon(Icons.call_end),
-                  ),
-                  FloatingActionButton(
-                    backgroundColor: _isCameraOff ? Colors.red : Colors.white,
-                    onPressed: _toggleCamera,
-                    child: Icon(
-                      _isCameraOff ? Icons.videocam_off : Icons.videocam,
-                      color: _isCameraOff ? Colors.white : Colors.black,
-                    ),
                   ),
                 ],
               ),
@@ -222,5 +236,13 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _localRenderer.dispose();
+    _remoteRenderer.dispose();
+    _webRTCService.cleanup();
+    super.dispose();
   }
 }

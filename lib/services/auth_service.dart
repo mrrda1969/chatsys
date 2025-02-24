@@ -11,8 +11,9 @@ class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
 
-  // Stream of Firebase User
+  // Stream of authentication state changes
   Stream<User?> get user => _auth.authStateChanges();
 
   // Create or update user profile in Firestore
@@ -79,101 +80,140 @@ class AuthService {
     }
   }
 
-  // Email & Password Sign Up
-  Future<UserModel?> signUpWithEmail({
-    required String email,
-    required String password,
-    String? displayName,
-    File? profileImage,
-  }) async {
+  // Email and Password Registration
+  Future<UserCredential?> registerWithEmailAndPassword(
+      String email, String password) async {
     try {
-      final userCredential = await _auth.createUserWithEmailAndPassword(
-        email: email,
+      return await _auth.createUserWithEmailAndPassword(
+        email: email.trim(),
         password: password,
       );
-
-      if (userCredential.user == null) return null;
-
-      return await createOrUpdateUserProfile(
-        userId: userCredential.user!.uid,
-        email: email,
-        displayName: displayName,
-        profileImage: profileImage,
-      );
     } on FirebaseAuthException catch (e) {
-      _handleAuthError(e);
+      print('Registration error: ${e.message}');
       return null;
     }
   }
 
-  // Email & Password Sign In
-  Future<UserCredential?> signInWithEmail(
-      {required String email, required String password}) async {
+  // Email and Password Login
+  Future<UserCredential?> signInWithEmailAndPassword(
+      String email, String password) async {
     try {
       return await _auth.signInWithEmailAndPassword(
-          email: email, password: password);
+        email: email.trim(),
+        password: password,
+      );
     } on FirebaseAuthException catch (e) {
-      _handleAuthError(e);
-      return null;
+      print('Login error: ${e.code} - ${e.message}');
+      return Future.error(e.message ?? "An unknown error occurred.");
     }
   }
 
-  // Google Sign In
-  Future<UserModel?> signInWithGoogle() async {
+  // Google Sign-In
+  Future<User?> signInWithGoogle() async {
     try {
-      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
-      final GoogleSignInAuthentication? googleAuth =
-          await googleUser?.authentication;
+      // Trigger the authentication flow
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) {
+        // The user canceled the sign-in
+        return null;
+      }
 
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth?.accessToken,
-        idToken: googleAuth?.idToken,
+      // Obtain the auth details from the request
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
+
+      // Create a new credential
+      final AuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
       );
 
-      final userCredential = await _auth.signInWithCredential(credential);
-
-      if (userCredential.user == null) return null;
-
-      return await createOrUpdateUserProfile(
-        userId: userCredential.user!.uid,
-        email: userCredential.user!.email!,
-        displayName: userCredential.user!.displayName,
-      );
+      // Sign in to Firebase with the Google user credential
+      final UserCredential userCredential =
+          await _auth.signInWithCredential(credential);
+      return userCredential.user;
     } catch (e) {
-      print('Google Sign-In Error: $e');
+      print('Error signing in with Google: $e');
       return null;
     }
   }
 
-  // Facebook Sign In
-  Future<UserModel?> signInWithFacebook() async {
+  // Facebook Sign-In
+  Future<UserCredential?> signInWithFacebook() async {
     try {
-      final LoginResult loginResult = await FacebookAuth.instance.login();
+      // Begin Facebook login flow
+      final LoginResult loginResult = await FacebookAuth.instance.login(
+        permissions: ['email', 'public_profile'],
+      );
 
+      if (loginResult.status != LoginStatus.success) {
+        print('Facebook login failed: ${loginResult.status}');
+        print('Message: ${loginResult.message}');
+        return null;
+      }
+
+      // Get access token
+      final AccessToken? accessToken = loginResult.accessToken;
+
+      if (accessToken == null) {
+        print('Facebook access token is null');
+        return null;
+      }
+
+      // Create Facebook credential
       final OAuthCredential facebookAuthCredential =
-          FacebookAuthProvider.credential(loginResult.accessToken!.tokenString);
+          FacebookAuthProvider.credential(accessToken.tokenString);
 
+      // Get user data
+      final userData = await FacebookAuth.instance.getUserData();
+
+      // Sign in to Firebase
       final userCredential =
           await _auth.signInWithCredential(facebookAuthCredential);
 
-      if (userCredential.user == null) return null;
+      // After successful sign in, create/update user profile
+      if (userCredential.user != null) {
+        await createOrUpdateUserProfile(
+          userId: userCredential.user!.uid,
+          email: userCredential.user!.email ?? userData['email'] ?? '',
+          displayName: userCredential.user!.displayName ?? userData['name'],
+          // Add profile picture if available
+          profileImage: null, // You can add profile picture handling here
+        );
+      }
 
-      return await createOrUpdateUserProfile(
-        userId: userCredential.user!.uid,
-        email: userCredential.user!.email!,
-        displayName: userCredential.user!.displayName,
-      );
+      return userCredential;
+    } on FirebaseAuthException catch (e) {
+      print('Firebase Auth Error: ${e.message}');
+      throw e;
     } catch (e) {
-      print('Facebook Sign-In Error: $e');
+      print('Facebook Sign-In error: $e');
       return null;
     }
   }
 
   // Sign Out
   Future<void> signOut() async {
-    await _auth.signOut();
-    await GoogleSignIn().signOut();
-    await FacebookAuth.instance.logOut();
+    try {
+      await _auth.signOut();
+      await _googleSignIn.signOut();
+
+      // Sign out from Google if signed in
+      final googleSignIn = GoogleSignIn();
+      if (await googleSignIn.isSignedIn()) {
+        await googleSignIn.signOut();
+      }
+
+      // Sign out from Facebook if signed in
+      final accessToken = await FacebookAuth.instance.accessToken;
+      if (accessToken != null) {
+        await FacebookAuth.instance.logOut();
+      }
+
+      print("User signed out successfully");
+    } catch (e) {
+      print("Logout error: $e");
+    }
   }
 
   // Error Handling
