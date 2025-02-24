@@ -1,16 +1,61 @@
-# chatsys
+# ChatSys User Profile Feature
 
-A new Flutter project.
+## Setup Instructions
 
-## Getting Started
+### Prerequisites
 
-This project is a starting point for a Flutter application.
+- Flutter SDK (3.0.0+)
+- Firebase Project
+- Firebase CLI
 
-A few resources to get you started if this is your first Flutter project:
+### Installation Steps
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+1. Clone the repository
+2. Run `flutter pub get` to install dependencies
+3. Configure Firebase:
+   - Create a Firebase project
+   - Add Android/iOS app to Firebase project
+   - Download `google-services.json` and `firebase_options.dart`
+   - Place configuration files in the appropriate directories
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### Firebase Configuration
+
+Ensure you have the following Firebase services enabled:
+
+- Authentication
+- Firestore
+- Storage
+
+### Running the App
+
+```bash
+flutter run
+```
+
+### Profile Page Features
+
+- Upload and update profile picture
+- Edit display name
+- Persistent profile data across sessions
+
+### Troubleshooting
+
+- Ensure all Firebase configuration files are correctly set up
+- Check internet connectivity
+- Verify Firebase project settings
+
+## Dependencies
+
+- Firebase Core
+- Firebase Auth
+- Cloud Firestore
+- Firebase Storage
+- Image Picker
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
