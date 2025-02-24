@@ -42,13 +42,13 @@ class _RegisterPageState extends State<RegisterPage> {
               .doc(userCredential.user!.uid)
               .get();
 
-          if (userDoc.exists) {
-            // User exists, navigate to contacts screen
+          if (userDoc.exists && userDoc.data()?['displayName'] != null) {
+            // User exists and has a complete profile, navigate to contacts screen
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(builder: (_) => const ContactsScreen()),
             );
           } else {
-            // User exists in auth but not in Firestore, navigate to profile setup
+            // User exists in auth but not in Firestore or profile is incomplete
             final userModel = UserModel(
               id: userCredential.user!.uid,
               email: userCredential.user!.email!,
@@ -68,7 +68,7 @@ class _RegisterPageState extends State<RegisterPage> {
         );
 
         if (userModel != null) {
-          // Navigate to profile setup
+          // Always navigate to profile setup after registration
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
               builder: (_) => ProfileSetupPage(initialUser: userModel),
@@ -87,16 +87,23 @@ class _RegisterPageState extends State<RegisterPage> {
     try {
       final result = await _authService.signInWithGoogle();
       if (result != null) {
-        // If it's a new user, navigate to profile setup
-        if (result.displayName == null) {
+        // Check if user has a complete profile in Firestore
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(result.id)
+            .get();
+
+        if (userDoc.exists && userDoc.data()?['displayName'] != null) {
+          // User has a complete profile, navigate to contacts screen
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const ContactsScreen()),
+          );
+        } else {
+          // Navigate to profile setup
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
               builder: (_) => ProfileSetupPage(initialUser: result),
             ),
-          );
-        } else {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const ContactsScreen()),
           );
         }
       }
@@ -111,16 +118,23 @@ class _RegisterPageState extends State<RegisterPage> {
     try {
       final result = await _authService.signInWithFacebook();
       if (result != null) {
-        // If it's a new user, navigate to profile setup
-        if (result.displayName == null) {
+        // Check if user has a complete profile in Firestore
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(result.id)
+            .get();
+
+        if (userDoc.exists && userDoc.data()?['displayName'] != null) {
+          // User has a complete profile, navigate to contacts screen
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const ContactsScreen()),
+          );
+        } else {
+          // Navigate to profile setup
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
               builder: (_) => ProfileSetupPage(initialUser: result),
             ),
-          );
-        } else {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const ContactsScreen()),
           );
         }
       }

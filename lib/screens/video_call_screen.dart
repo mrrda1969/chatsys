@@ -2,7 +2,6 @@ import 'package:chatsys/services/call_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
 class VideoCallScreen extends StatefulWidget {
   final String callId;

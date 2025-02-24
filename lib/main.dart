@@ -5,8 +5,6 @@ import 'package:provider/provider.dart';
 import 'firebase_options.dart';
 import 'screens/splash_screen.dart';
 import 'theme/theme_provider.dart';
-import 'screens/contacts_screen.dart';
-import 'screens/register_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
