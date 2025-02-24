@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -18,23 +20,86 @@ class _ContactsPageState extends State<ContactsPage>
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  StreamSubscription<QuerySnapshot>? _notificationSubscription;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _setupCallNotificationListener();
+  }
+
+  void _setupCallNotificationListener() {
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) return;
+
+    _notificationSubscription = _firestore
+        .collection('users')
+        .doc(currentUser.uid)
+        .collection('notifications')
+        .where('status', isEqualTo: 'pending')
+        .where('type', isEqualTo: 'call')
+        .where('read', isEqualTo: false)
+        .snapshots()
+        .listen((snapshot) {
+          for (var change in snapshot.docChanges) {
+            if (change.type == DocumentChangeType.added) {
+              final notification = change.doc.data() as Map<String, dynamic>;
+              _showIncomingCallDialog(
+                notification['callId'],
+                notification['callerName'],
+              );
+            }
+          }
+        });
+  }
+
+  void _showIncomingCallDialog(String callId, String callerName) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Incoming Video Call'),
+          content: Text('$callerName is calling you'),
+          actions: [
+            TextButton(
+              child: const Text('Decline'),
+              onPressed: () {
+                Navigator.of(context).pop();
+                navigateToVideoChat(
+                  context,
+                  '',
+                  callId: callId,
+                  isIncomingCall: true,
+                  shouldReject: true,
+                );
+              },
+            ),
+            ElevatedButton(
+              child: const Text('Answer'),
+              onPressed: () {
+                Navigator.of(context).pop();
+                navigateToVideoChat(
+                  context,
+                  '',
+                  callId: callId,
+                  isIncomingCall: true,
+                );
+              },
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
   void dispose() {
-    try {
-      _tabController.dispose();
-      _searchController.dispose();
-    } catch (e) {
-      print('Error during contacts page disposal: $e');
-    } finally {
-      super.dispose();
-    }
+    _notificationSubscription?.cancel();
+    _tabController.dispose();
+    _searchController.dispose();
+    super.dispose();
   }
 
   // Add a user to contacts
@@ -55,12 +120,14 @@ class _ContactsPageState extends State<ContactsPage>
               .get();
 
       if (existingContact.exists) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$email is already in your contacts'),
-            backgroundColor: Colors.orange,
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('$email is already in your contacts'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
         return;
       }
 
@@ -76,20 +143,24 @@ class _ContactsPageState extends State<ContactsPage>
             'addedAt': FieldValue.serverTimestamp(),
           });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Added $email to contacts'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Added $email to contacts'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } catch (e) {
       print('Error adding contact: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error adding contact: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error adding contact: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -108,20 +179,24 @@ class _ContactsPageState extends State<ContactsPage>
           .doc(userId)
           .delete();
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Removed $email from contacts'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Removed $email from contacts'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } catch (e) {
       print('Error removing contact: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error removing contact: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error removing contact: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -139,62 +214,24 @@ class _ContactsPageState extends State<ContactsPage>
         .map((doc) => doc.exists);
   }
 
-  // Logout method with better error handling and safe navigation
   void _logout() async {
     try {
       await FirebaseAuth.instance.signOut();
-
-      // Use a post-frame callback to ensure the context is still valid
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const LoginPage()),
-          );
-        }
-      });
+      if (mounted) {
+        Navigator.of(
+          context,
+        ).pushReplacement(MaterialPageRoute(builder: (_) => const LoginPage()));
+      }
     } catch (e) {
       print('Logout error: $e');
-
-      // Use post-frame callback for error display
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Logout failed: ${e.toString()}'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      });
-    }
-  }
-
-  // Enhanced navigation to video chat with error handling
-  void _safeNavigateToVideoChat(BuildContext context, String userId) {
-    try {
-      final currentUser = FirebaseAuth.instance.currentUser;
-      if (currentUser == null) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please log in to start a video call')),
+          SnackBar(
+            content: Text('Logout failed: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
         );
-        return;
       }
-
-      // Use a try-catch block for navigation
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder:
-              (context) => VideoChatPage(peerId: userId, isIncomingCall: false),
-        ),
-      );
-    } catch (e) {
-      print('Navigation error in contacts page: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Unable to start video call: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
     }
   }
 
@@ -213,13 +250,7 @@ class _ContactsPageState extends State<ContactsPage>
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [
-          // Contacts Tab
-          _buildContactsTab(),
-
-          // Search Users Tab
-          _buildSearchTab(),
-        ],
+        children: [_buildContactsTab(), _buildSearchTab()],
       ),
     );
   }
@@ -238,27 +269,7 @@ class _ContactsPageState extends State<ContactsPage>
               .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.error_outline, color: Colors.red, size: 64),
-                const SizedBox(height: 16),
-                Text(
-                  'Error loading contacts',
-                  style: TextStyle(color: Colors.red[700], fontSize: 18),
-                ),
-                Text(
-                  'Details: ${snapshot.error}',
-                  style: TextStyle(color: Colors.red[400]),
-                ),
-                TextButton(
-                  onPressed: () => setState(() {}),
-                  child: const Text('Retry'),
-                ),
-              ],
-            ),
-          );
+          return Center(child: Text('Error: ${snapshot.error}'));
         }
 
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -266,24 +277,7 @@ class _ContactsPageState extends State<ContactsPage>
         }
 
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.people_outline, size: 64, color: Colors.grey[400]),
-                const SizedBox(height: 16),
-                Text(
-                  'No contacts yet',
-                  style: TextStyle(fontSize: 18, color: Colors.grey[600]),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Add contacts using the search tab',
-                  style: TextStyle(color: Colors.grey[500]),
-                ),
-              ],
-            ),
-          );
+          return const Center(child: Text('No contacts yet'));
         }
 
         return ListView.builder(
@@ -292,11 +286,7 @@ class _ContactsPageState extends State<ContactsPage>
             final contact = snapshot.data!.docs[index];
             return ListTile(
               leading: CircleAvatar(
-                backgroundColor: Theme.of(context).primaryColor,
-                child: Text(
-                  contact['email'][0].toUpperCase(),
-                  style: const TextStyle(color: Colors.white),
-                ),
+                child: Text(contact['email'][0].toUpperCase()),
               ),
               title: Text(contact['email']),
               trailing: Row(
@@ -305,10 +295,7 @@ class _ContactsPageState extends State<ContactsPage>
                   IconButton(
                     icon: const Icon(Icons.video_call),
                     onPressed:
-                        () => _safeNavigateToVideoChat(
-                          context,
-                          contact['userId'],
-                        ),
+                        () => navigateToVideoChat(context, contact['userId']),
                   ),
                   IconButton(
                     icon: const Icon(Icons.delete),
@@ -328,14 +315,12 @@ class _ContactsPageState extends State<ContactsPage>
   Widget _buildSearchTab() {
     return Column(
       children: [
-        // Search Bar
         Padding(
           padding: const EdgeInsets.all(8.0),
           child: TextField(
             controller: _searchController,
             decoration: InputDecoration(
-              hintText: 'Search users by email',
-              prefixIcon: const Icon(Icons.search),
+              labelText: 'Search users',
               suffixIcon:
                   _searchQuery.isNotEmpty
                       ? IconButton(
@@ -346,15 +331,10 @@ class _ContactsPageState extends State<ContactsPage>
                         },
                       )
                       : null,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
             ),
             onChanged: (value) => setState(() => _searchQuery = value),
           ),
         ),
-
-        // Search Results with more robust error handling
         Expanded(
           child: StreamBuilder<QuerySnapshot>(
             stream:
@@ -365,60 +345,20 @@ class _ContactsPageState extends State<ContactsPage>
                     .snapshots(),
             builder: (context, snapshot) {
               if (snapshot.hasError) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(
-                        Icons.error_outline,
-                        color: Colors.red,
-                        size: 64,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Error loading search results',
-                        style: TextStyle(color: Colors.red[700], fontSize: 18),
-                      ),
-                      Text(
-                        'Details: ${snapshot.error}',
-                        style: TextStyle(color: Colors.red[400]),
-                      ),
-                      TextButton(
-                        onPressed: () => setState(() {}),
-                        child: const Text('Retry'),
-                      ),
-                    ],
-                  ),
-                );
+                return Center(child: Text('Error: ${snapshot.error}'));
               }
 
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
               }
 
-              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.search_off, size: 64, color: Colors.grey[400]),
-                      const SizedBox(height: 16),
-                      Text(
-                        'No users found',
-                        style: TextStyle(fontSize: 18, color: Colors.grey[600]),
-                      ),
-                    ],
-                  ),
-                );
-              }
-
               return ListView.builder(
                 itemCount: snapshot.data!.docs.length,
                 itemBuilder: (context, index) {
                   final user = snapshot.data!.docs[index];
-                  // Don't show current user in search results
-                  if (user.id == _auth.currentUser?.uid)
+                  if (user.id == _auth.currentUser?.uid) {
                     return const SizedBox.shrink();
+                  }
 
                   return StreamBuilder<bool>(
                     stream: _isInContacts(user.id),
@@ -427,11 +367,7 @@ class _ContactsPageState extends State<ContactsPage>
 
                       return ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: Theme.of(context).primaryColor,
-                          child: Text(
-                            user['email'][0].toUpperCase(),
-                            style: const TextStyle(color: Colors.white),
-                          ),
+                          child: Text(user['email'][0].toUpperCase()),
                         ),
                         title: Text(user['email']),
                         subtitle: Text(
@@ -456,10 +392,7 @@ class _ContactsPageState extends State<ContactsPage>
                             IconButton(
                               icon: const Icon(Icons.video_call),
                               onPressed:
-                                  () => _safeNavigateToVideoChat(
-                                    context,
-                                    user.id,
-                                  ),
+                                  () => navigateToVideoChat(context, user.id),
                             ),
                           ],
                         ),

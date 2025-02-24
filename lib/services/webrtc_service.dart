@@ -33,10 +33,7 @@ class WebRTCService {
     };
 
     MediaStream stream = await navigator.mediaDevices.getUserMedia(constraints);
-
-    // Trigger local stream callback if set
     onLocalStreamAvailable?.call(stream);
-
     return stream;
   }
 
@@ -48,7 +45,6 @@ class WebRTCService {
       pc.addTrack(track, _localStream!);
     });
 
-    // Set up remote stream tracking
     pc.onTrack = (event) {
       if (event.track.kind == 'video') {
         _remoteStream = event.streams[0];
@@ -87,19 +83,31 @@ class WebRTCService {
       await callDoc.set({
         'offer': offer.toMap(),
         'caller': currentUser.uid,
+        'callerName': currentUser.displayName ?? currentUser.email ?? 'Unknown',
         'callee': peerId,
         'status': 'pending',
         'timestamp': FieldValue.serverTimestamp(),
+        'type': 'video',
       });
 
-      // Send push notification to the callee
-      await _sendCallNotification(
-        peerId,
-        callId,
-        currentUser.displayName ?? 'Someone',
-      );
+      // Create a notification document for the callee
+      await _firestore
+          .collection('users')
+          .doc(peerId)
+          .collection('notifications')
+          .doc(callId)
+          .set({
+            'type': 'call',
+            'callId': callId,
+            'caller': currentUser.uid,
+            'callerName':
+                currentUser.displayName ?? currentUser.email ?? 'Unknown',
+            'timestamp': FieldValue.serverTimestamp(),
+            'status': 'pending',
+            'read': false,
+          });
 
-      // Listen for remote answer
+      // Listen for answer
       callDoc.snapshots().listen((snapshot) async {
         if (!snapshot.exists) return;
 
@@ -110,10 +118,12 @@ class WebRTCService {
             data['answer']['type'],
           );
           await _peerConnection!.setRemoteDescription(answer);
+        } else if (data['status'] == 'rejected' || data['status'] == 'ended') {
+          cleanup();
         }
       });
 
-      // Listen for ICE candidates from remote peer
+      // Listen for ICE candidates
       callDoc.collection('candidates').snapshots().listen((snapshot) {
         for (var change in snapshot.docChanges) {
           if (change.type == DocumentChangeType.added) {
@@ -129,48 +139,7 @@ class WebRTCService {
     } catch (e) {
       print('Error starting call: $e');
       cleanup();
-    }
-  }
-
-  // Send call notification to the callee
-  Future<void> _sendCallNotification(
-    String calleeId,
-    String callId,
-    String callerName,
-  ) async {
-    try {
-      // Store call notification in Firestore for the callee
-      await _firestore
-          .collection('users')
-          .doc(calleeId)
-          .collection('call_notifications')
-          .doc(callId)
-          .set({
-            'callId': callId,
-            'caller': _auth.currentUser?.uid,
-            'callerName': callerName,
-            'status': 'incoming',
-            'timestamp': FieldValue.serverTimestamp(),
-          });
-
-      // Optional: Add a listener for call notifications
-      _firestore
-          .collection('users')
-          .doc(calleeId)
-          .collection('call_notifications')
-          .doc(callId)
-          .snapshots()
-          .listen((snapshot) {
-            if (snapshot.exists) {
-              final data = snapshot.data();
-              if (data?['status'] == 'rejected') {
-                // Handle call rejection
-                cleanup();
-              }
-            }
-          });
-    } catch (e) {
-      print('Error sending call notification: $e');
+      rethrow;
     }
   }
 
@@ -202,15 +171,18 @@ class WebRTCService {
       // Save the answer to Firestore
       await callDoc.update({'answer': answer.toMap(), 'status': 'answered'});
 
-      // Update call notification status
-      await _firestore
-          .collection('users')
-          .doc(callData['caller'])
-          .collection('call_notifications')
-          .doc(callId)
-          .update({'status': 'answered'});
+      // Update notification status
+      final currentUser = _auth.currentUser;
+      if (currentUser != null) {
+        await _firestore
+            .collection('users')
+            .doc(currentUser.uid)
+            .collection('notifications')
+            .doc(callId)
+            .update({'status': 'answered', 'read': true});
+      }
 
-      // Listen for ICE candidates from caller
+      // Listen for ICE candidates
       callDoc.collection('candidates').snapshots().listen((snapshot) {
         for (var change in snapshot.docChanges) {
           if (change.type == DocumentChangeType.added) {
@@ -223,55 +195,100 @@ class WebRTCService {
           }
         }
       });
+
+      // Listen for call status changes
+      callDoc.snapshots().listen((snapshot) {
+        if (!snapshot.exists) return;
+        final data = snapshot.data() as Map<String, dynamic>;
+        if (data['status'] == 'ended') {
+          cleanup();
+        }
+      });
     } catch (e) {
       print('Error answering call: $e');
       cleanup();
+      rethrow;
     }
   }
 
-  // Method to reject an incoming call
   Future<void> rejectCall(String callId, String callerId) async {
     try {
       // Update call document status
       final callDoc = _firestore.collection('calls').doc(callId);
       await callDoc.update({'status': 'rejected'});
 
-      // Update call notification status
-      await _firestore
-          .collection('users')
-          .doc(callerId)
-          .collection('call_notifications')
-          .doc(callId)
-          .update({'status': 'rejected'});
+      // Update notification status
+      final currentUser = _auth.currentUser;
+      if (currentUser != null) {
+        await _firestore
+            .collection('users')
+            .doc(currentUser.uid)
+            .collection('notifications')
+            .doc(callId)
+            .update({'status': 'rejected', 'read': true});
+      }
 
       cleanup();
     } catch (e) {
       print('Error rejecting call: $e');
+      rethrow;
     }
-  }
-
-  void cleanup() {
-    _localStream?.getTracks().forEach((track) => track.stop());
-    _remoteStream?.getTracks().forEach((track) => track.stop());
-
-    _localStream?.dispose();
-    _remoteStream?.dispose();
-    _peerConnection?.close();
-
-    _localStream = null;
-    _remoteStream = null;
-    _peerConnection = null;
   }
 
   Future<void> endCall(String callId) async {
     try {
-      await _firestore.collection('calls').doc(callId).update({
-        'status': 'ended',
-        'endedAt': FieldValue.serverTimestamp(),
-      });
+      final callDoc = _firestore.collection('calls').doc(callId);
+      final callData = (await callDoc.get()).data();
+
+      if (callData != null) {
+        // Update call status
+        await callDoc.update({
+          'status': 'ended',
+          'endedAt': FieldValue.serverTimestamp(),
+        });
+
+        // Update notification for both users
+        final currentUser = _auth.currentUser;
+        if (currentUser != null) {
+          // Update notification for caller
+          await _firestore
+              .collection('users')
+              .doc(callData['caller'])
+              .collection('notifications')
+              .doc(callId)
+              .update({'status': 'ended', 'read': true});
+
+          // Update notification for callee
+          await _firestore
+              .collection('users')
+              .doc(callData['callee'])
+              .collection('notifications')
+              .doc(callId)
+              .update({'status': 'ended', 'read': true});
+        }
+      }
+
       cleanup();
     } catch (e) {
       print('Error ending call: $e');
+      rethrow;
+    }
+  }
+
+  void cleanup() {
+    try {
+      _localStream?.getTracks().forEach((track) => track.stop());
+      _remoteStream?.getTracks().forEach((track) => track.stop());
+
+      _localStream?.dispose();
+      _remoteStream?.dispose();
+      _peerConnection?.close();
+
+      _localStream = null;
+      _remoteStream = null;
+      _peerConnection = null;
+    } catch (e) {
+      print('Error during cleanup: $e');
     }
   }
 }
