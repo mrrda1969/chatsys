@@ -1,3 +1,4 @@
+import 'dart:io' show SocketException, InternetAddress;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:chatsys/auth/login_page.dart';
 import 'package:chatsys/pages/contacts_page.dart';
@@ -24,6 +25,44 @@ class _RegisterPageState extends State<RegisterPage> {
 
   bool _isLoading = false;
 
+  // Add a method to handle network connectivity
+  //bool _isNetworkAvailable = true;
+
+  Future<bool> _checkNetworkConnectivity() async {
+    try {
+      final result = await InternetAddress.lookup('google.com');
+      return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
+    } on SocketException catch (_) {
+      return false;
+    }
+  }
+
+  // Enhanced error handling for authentication methods
+  void _showDetailedErrorDialog(String title, String message) {
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: Text(title, style: TextStyle(color: Colors.red[700])),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
+              if (title == 'Network Error')
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    // Optionally open device settings
+                  },
+                  child: const Text('Open Settings'),
+                ),
+            ],
+          ),
+    );
+  }
+
   // Add user to Firestore collection
   Future<void> _addUserToFirestore(User user, {String? name}) async {
     try {
@@ -39,13 +78,32 @@ class _RegisterPageState extends State<RegisterPage> {
     }
   }
 
-  // Email/Password Registration
+  // Email/Password Registration with enhanced error handling
   Future<void> _registerWithEmail() async {
+    // Check network connectivity first
+    final networkStatus = await _checkNetworkConnectivity();
+    if (!networkStatus) {
+      _showDetailedErrorDialog(
+        'Network Error',
+        'No internet connection. Please check your network settings.',
+      );
+      return;
+    }
+
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
 
     try {
+      // Validate password strength
+      if (_passwordController.text.length < 8) {
+        _showDetailedErrorDialog(
+          'Weak Password',
+          'Password must be at least 8 characters long.',
+        );
+        return;
+      }
+
       UserCredential userCredential = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(
             email: _emailController.text.trim(),
@@ -61,82 +119,184 @@ class _RegisterPageState extends State<RegisterPage> {
         name: _nameController.text,
       );
 
-      // Navigate to Contacts Page
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const ContactsPage()),
-      );
+      // Safe navigation
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const ContactsPage()),
+        );
+      }
     } on FirebaseAuthException catch (e) {
-      _showErrorDialog(e.message ?? 'An error occurred');
+      String errorMessage;
+      switch (e.code) {
+        case 'weak-password':
+          errorMessage =
+              'The password is too weak. Please choose a stronger password.';
+          break;
+        case 'email-already-in-use':
+          errorMessage =
+              'An account already exists with this email. Try logging in.';
+          break;
+        case 'invalid-email':
+          errorMessage = 'Invalid email format. Please check your email.';
+          break;
+        default:
+          errorMessage =
+              e.message ?? 'An unexpected registration error occurred.';
+      }
+      _showDetailedErrorDialog('Registration Failed', errorMessage);
     } catch (e) {
-      _showErrorDialog('Something went wrong. Please try again.');
+      _showDetailedErrorDialog(
+        'Unexpected Error',
+        'Something went wrong during registration. Please try again later.',
+      );
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
-  // Google Sign-In
+  // Google Sign-In with enhanced error handling
   Future<void> _signInWithGoogle() async {
+    // Check network connectivity first
+    final networkStatus = await _checkNetworkConnectivity();
+    if (!networkStatus) {
+      _showDetailedErrorDialog(
+        'Network Error',
+        'No internet connection. Please check your network settings.',
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
     try {
       final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+
+      if (googleUser == null) {
+        // User canceled the sign-in
+        return;
+      }
+
       final GoogleSignInAuthentication? googleAuth =
-          await googleUser?.authentication;
+          await googleUser.authentication;
 
-      if (googleAuth != null) {
-        final credential = GoogleAuthProvider.credential(
-          accessToken: googleAuth.accessToken,
-          idToken: googleAuth.idToken,
+      if (googleAuth == null) {
+        _showDetailedErrorDialog(
+          'Google Sign-In Failed',
+          'Unable to authenticate with Google. Please try again.',
         );
+        return;
+      }
 
-        final UserCredential userCredential = await FirebaseAuth.instance
-            .signInWithCredential(credential);
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
 
-        // Add user to Firestore
-        await _addUserToFirestore(userCredential.user!);
+      final UserCredential userCredential = await FirebaseAuth.instance
+          .signInWithCredential(credential);
 
+      // Add user to Firestore
+      await _addUserToFirestore(userCredential.user!);
+
+      // Safe navigation
+      if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const ContactsPage()),
         );
       }
     } catch (e) {
-      _showErrorDialog('Google Sign-In failed');
+      _showDetailedErrorDialog(
+        'Google Sign-In Failed',
+        'An error occurred during Google authentication. Please try again.',
+      );
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
-  // Facebook Sign-In
+  // Facebook Sign-In with enhanced error handling
   Future<void> _signInWithFacebook() async {
+    // Check network connectivity first
+    final networkStatus = await _checkNetworkConnectivity();
+    if (!networkStatus) {
+      _showDetailedErrorDialog(
+        'Network Error',
+        'No internet connection. Please check your network settings.',
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
     try {
       final LoginResult result = await FacebookAuth.instance.login();
 
-      if (result.status == LoginStatus.success && result.accessToken != null) {
-        final OAuthCredential credential = FacebookAuthProvider.credential(
-          result.accessToken!.tokenString,
-        );
+      switch (result.status) {
+        case LoginStatus.success:
+          if (result.accessToken != null) {
+            final OAuthCredential credential = FacebookAuthProvider.credential(
+              result.accessToken!.tokenString,
+            );
 
-        final UserCredential userCredential = await FirebaseAuth.instance
-            .signInWithCredential(credential);
+            final UserCredential userCredential = await FirebaseAuth.instance
+                .signInWithCredential(credential);
 
-        // Add user to Firestore
-        await _addUserToFirestore(userCredential.user!);
+            // Add user to Firestore
+            await _addUserToFirestore(userCredential.user!);
 
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const ContactsPage()),
-        );
-      } else {
-        _showErrorDialog('Facebook Sign-In failed: ${result.message}');
+            // Safe navigation
+            if (mounted) {
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const ContactsPage()),
+              );
+            }
+          }
+          break;
+        case LoginStatus.cancelled:
+          _showDetailedErrorDialog(
+            'Facebook Sign-In',
+            'Sign-in was cancelled by the user.',
+          );
+          break;
+        case LoginStatus.failed:
+          _showDetailedErrorDialog(
+            'Facebook Sign-In Failed',
+            result.message ?? 'Authentication failed. Please try again.',
+          );
+          break;
+        case LoginStatus.operationInProgress:
+          _showDetailedErrorDialog(
+            'Facebook Sign-In',
+            'Another sign-in operation is in progress.',
+          );
+          break;
       }
     } catch (e) {
-      _showErrorDialog('Facebook Sign-In failed: $e');
+      _showDetailedErrorDialog(
+        'Facebook Sign-In Failed',
+        'An unexpected error occurred. Please try again.',
+      );
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
-  // Apple Sign-In
+  // Apple Sign-In with enhanced error handling
   Future<void> _signInWithApple() async {
+    // Check network connectivity first
+    final networkStatus = await _checkNetworkConnectivity();
+    if (!networkStatus) {
+      _showDetailedErrorDialog(
+        'Network Error',
+        'No internet connection. Please check your network settings.',
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
     try {
       final credential = await SignInWithApple.getAppleIDCredential(
@@ -158,13 +318,21 @@ class _RegisterPageState extends State<RegisterPage> {
       // Add user to Firestore
       await _addUserToFirestore(userCredential.user!);
 
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const ContactsPage()),
-      );
+      // Safe navigation
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const ContactsPage()),
+        );
+      }
     } catch (e) {
-      _showErrorDialog('Apple Sign-In failed');
+      _showDetailedErrorDialog(
+        'Apple Sign-In Failed',
+        'An error occurred during Apple authentication. Please try again.',
+      );
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -174,23 +342,6 @@ class _RegisterPageState extends State<RegisterPage> {
       builder:
           (context) => AlertDialog(
             title: const Text('Success'),
-            content: Text(message),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-    );
-  }
-
-  void _showErrorDialog(String message) {
-    showDialog(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Error'),
             content: Text(message),
             actions: [
               TextButton(
