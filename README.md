@@ -28,8 +28,22 @@ Ensure you have the following Firebase services enabled:
 
 ### Running the App
 
+#### Android
+
 ```bash
-flutter run
+flutter run -d android
+```
+
+#### iOS
+
+```bash
+flutter run -d ios
+```
+
+#### Web
+
+```bash
+flutter run -d chrome
 ```
 
 ### Profile Page Features
@@ -51,6 +65,14 @@ flutter run
 - Cloud Firestore
 - Firebase Storage
 - Image Picker
+- Provider
+- Firebase Analytics
+- Cupertino Icons
+- Google Sign-In
+- Flutter Facebook Auth
+- Font Awesome Flutter
+- Flutter WebRTC
+- Cached Network Image
 
 ## Contributing
 
