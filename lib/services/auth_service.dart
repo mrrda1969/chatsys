@@ -139,57 +139,20 @@ class AuthService {
   }
 
   // Facebook Sign-In
-  Future<UserCredential?> signInWithFacebook() async {
+  Future<User?> signInWithFacebook() async {
     try {
-      // Begin Facebook login flow
-      final LoginResult loginResult = await FacebookAuth.instance.login(
-        permissions: ['email', 'public_profile'],
-      );
-
-      if (loginResult.status != LoginStatus.success) {
-        print('Facebook login failed: ${loginResult.status}');
-        print('Message: ${loginResult.message}');
-        return null;
+      final LoginResult result = await FacebookAuth.instance.login();
+      if (result.status == LoginStatus.success) {
+        final OAuthCredential credential =
+            FacebookAuthProvider.credential(result.accessToken!.tokenString);
+        final UserCredential userCredential =
+            await _auth.signInWithCredential(credential);
+        return userCredential.user;
       }
-
-      // Get access token
-      final AccessToken? accessToken = loginResult.accessToken;
-
-      if (accessToken == null) {
-        print('Facebook access token is null');
-        return null;
-      }
-
-      // Create Facebook credential
-      final OAuthCredential facebookAuthCredential =
-          FacebookAuthProvider.credential(accessToken.tokenString);
-
-      // Get user data
-      final userData = await FacebookAuth.instance.getUserData();
-
-      // Sign in to Firebase
-      final userCredential =
-          await _auth.signInWithCredential(facebookAuthCredential);
-
-      // After successful sign in, create/update user profile
-      if (userCredential.user != null) {
-        await createOrUpdateUserProfile(
-          userId: userCredential.user!.uid,
-          email: userCredential.user!.email ?? userData['email'] ?? '',
-          displayName: userCredential.user!.displayName ?? userData['name'],
-          // Add profile picture if available
-          profileImage: null, // You can add profile picture handling here
-        );
-      }
-
-      return userCredential;
-    } on FirebaseAuthException catch (e) {
-      print('Firebase Auth Error: ${e.message}');
-      throw e;
     } catch (e) {
-      print('Facebook Sign-In error: $e');
-      return null;
+      print('Error during Facebook sign-in: $e');
     }
+    return null;
   }
 
   // Sign Out

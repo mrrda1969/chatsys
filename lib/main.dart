@@ -21,7 +21,7 @@ void main() async {
   //   options: const FacebookOptions(
   //     appId: 'YOUR_FACEBOOK_APP_ID',
   //     clientToken: 'YOUR_CLIENT_TOKEN',
-  //     loginBehavior: LoginBehavior.nativeWithFallback, // Recommended
+  //     loginBehavior: LoginBehavior.nativeWithFallback,
   //   ),
   // );
 

@@ -1,12 +1,12 @@
+import 'package:chatsys/models/contact_model.dart';
+import 'package:chatsys/models/user_model.dart';
+import 'package:chatsys/screens/video_call_screen.dart';
+import 'package:chatsys/services/auth_service.dart';
+import 'package:chatsys/services/contacts_service.dart';
+import 'package:chatsys/services/webrtc_service.dart';
+import 'package:chatsys/screens/login_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../models/user_model.dart';
-import '../models/contact_model.dart';
-import '../services/contacts_service.dart';
-import '../services/auth_service.dart';
-import '../services/webrtc_service.dart';
-import 'login_screen.dart';
-import 'video_call_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -162,61 +162,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
         ),
       ],
     );
-  }
-
-  void _showIncomingCallDialog(Map<String, dynamic> call) {
-    // Check if dialog is already showing to prevent multiple dialogs
-    if (ModalRoute.of(context)?.isCurrent ?? false) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          title: const Text('Incoming Video Call'),
-          content: Text('${call['callerName']} is calling'),
-          actions: [
-            TextButton(
-              onPressed: () {
-                // Reject the call
-                final currentUser = FirebaseAuth.instance.currentUser;
-                if (currentUser != null) {
-                  _webRTCService.rejectCall(call['id'], currentUser.uid);
-                }
-                Navigator.of(context).pop();
-
-                // Remove this call from processed calls
-                setState(() {
-                  _incomingCalls.removeWhere((c) => c['id'] == call['id']);
-                  _processedCallIds.remove(call['id']);
-                });
-              },
-              child: const Text('Reject'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                // Navigate to video call screen
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) => VideoCallScreen(
-                      contactId: call['callerId'],
-                      isIncoming: true,
-                      callId: call['id'],
-                    ),
-                  ),
-                );
-
-                // Remove this call from processed calls
-                setState(() {
-                  _incomingCalls.removeWhere((c) => c['id'] == call['id']);
-                  _processedCallIds.remove(call['id']);
-                });
-              },
-              child: const Text('Accept'),
-            ),
-          ],
-        ),
-      );
-    }
   }
 
   Future<void> _searchUsers(String query) async {

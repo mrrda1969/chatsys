@@ -75,23 +75,15 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _signInWithFacebook() async {
-    setState(() => _isLoading = true);
-    try {
-      final result = await _authService.signInWithFacebook();
-      if (result != null) {
-        if (!mounted) return;
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => const ContactsScreen(),
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to sign in with Facebook')),
-        );
-      }
-    } finally {
-      setState(() => _isLoading = false);
+    final user = await _authService.signInWithFacebook();
+    if (user != null) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const ContactsScreen()),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to sign in with Facebook')),
+      );
     }
   }
 
